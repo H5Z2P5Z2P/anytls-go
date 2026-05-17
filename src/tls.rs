@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::sync::Arc;
 
 use rcgen::generate_simple_self_signed;
@@ -52,19 +53,53 @@ pub fn server_config_from_paths(certificate_path: &str, key_path: &str) -> Resul
         return Err(AnyTlsError::protocol("no certificates found in certificate_path"));
     }
 
-    let mut pkcs8_keys = rustls_pemfile::pkcs8_private_keys(&mut key_pem.as_slice())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|err| AnyTlsError::protocol(format!("failed to parse private key PEM: {err}")))?;
-    let key = pkcs8_keys
-        .drain(..)
-        .next()
-        .ok_or_else(|| AnyTlsError::protocol("no PKCS#8 private key found in key_path"))?;
+    let key = private_key_from_pem(&key_pem)?;
 
     Ok(Arc::new(
         ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(certificates, PrivateKeyDer::Pkcs8(key))?,
+            .with_single_cert(certificates, key)?,
     ))
+}
+
+fn private_key_from_pem(pem: &[u8]) -> Result<PrivateKeyDer<'static>> {
+    let mut reader = io::BufReader::new(pem);
+    loop {
+        let item = rustls_pemfile::read_one(&mut reader)
+            .map_err(|err| AnyTlsError::protocol(format!("failed to parse private key PEM: {err}")))?;
+        match item {
+            Some(rustls_pemfile::Item::Pkcs8Key(key)) => return Ok(PrivateKeyDer::Pkcs8(key)),
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return Ok(PrivateKeyDer::Pkcs1(key)),
+            Some(rustls_pemfile::Item::Sec1Key(key)) => return Ok(PrivateKeyDer::Sec1(key)),
+            Some(_) => continue,
+            None => {
+                return Err(AnyTlsError::protocol(
+                    "no supported private key found in key_path; expected PKCS#8, PKCS#1, or SEC1 PEM",
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::private_key_from_pem;
+
+    #[test]
+    fn tls_loader_accepts_pkcs8_private_key_pem() {
+        let pem = std::fs::read(
+            "/home/huaihuai/work/anytls-go/vendor/rustls-reality/test-ca/rsa/end.rsa",
+        )
+        .unwrap();
+        assert!(private_key_from_pem(&pem).is_ok());
+    }
+
+    #[test]
+    fn tls_loader_rejects_missing_private_key() {
+        let err = private_key_from_pem(b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+            .unwrap_err();
+        assert!(err.to_string().contains("no supported private key found"));
+    }
 }
 
 #[derive(Debug)]
