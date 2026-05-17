@@ -1,15 +1,21 @@
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::process::Command as ProcessCommand;
 
 use anytls::auth::password_hash;
 use anytls::client::Client;
+use anytls::config::{ServerFileConfig, ServerTcpBrutalConfig, mbps_to_bytes_per_second};
 use anytls::error::{AnyTlsError, Result};
 use anytls::logging::init_tracing;
 use anytls::padding::PaddingFactory;
+use anytls::reality::{RealityConfig, generate_keypair, public_key_from_private_key};
 use anytls::server::Server;
 use anytls::socks_addr::SocksAddr;
+use anytls::tcp_brutal::TcpBrutalConfig;
 use anytls::uot::{Request as UotRequest, request_destination};
 use clap::{Parser, Subcommand};
+use rand::{RngCore, rngs::OsRng};
+use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tracing::debug;
@@ -36,14 +42,81 @@ enum Command {
         password: String,
         #[arg(short = 'm', default_value_t = 5)]
         min_idle_session: usize,
+        #[arg(long)]
+        tcp_brutal_rate: Option<u64>,
+        #[arg(long)]
+        tcp_brutal_cwnd_gain: Option<u32>,
     },
     Server {
+        #[arg(long)]
+        config: Option<String>,
         #[arg(short = 'l', default_value = "0.0.0.0:8443")]
         listen: String,
         #[arg(short = 'p')]
-        password: String,
+        password: Option<String>,
         #[arg(long)]
         padding_scheme: Option<String>,
+        #[arg(long, default_value = "tls")]
+        security: String,
+        #[arg(long)]
+        reality_dest: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        reality_server_names: Vec<String>,
+        #[arg(long)]
+        reality_private_key: Option<String>,
+        #[arg(long)]
+        reality_public_key: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        reality_short_ids: Vec<String>,
+        #[arg(long, default_value = "chrome")]
+        reality_fingerprint: String,
+        #[arg(long)]
+        tcp_brutal_rate: Option<u64>,
+        #[arg(long)]
+        tcp_brutal_cwnd_gain: Option<u32>,
+    },
+    Generate {
+        #[command(subcommand)]
+        command: GenerateCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum GenerateCommand {
+    RealityKeypair,
+    Rand {
+        #[arg(long)]
+        hex: Option<usize>,
+        #[arg(long)]
+        base64: Option<usize>,
+    },
+    RealityServerConfig {
+        #[arg(long, default_value = "0.0.0.0:443")]
+        listen: String,
+        #[arg(long)]
+        server: String,
+        #[arg(long)]
+        port: u16,
+        #[arg(long)]
+        sni: String,
+        #[arg(long)]
+        dest: Option<String>,
+        #[arg(long, default_value = "chrome")]
+        fingerprint: String,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        private_key: Option<String>,
+        #[arg(long)]
+        short_id: Option<String>,
+        #[arg(long)]
+        up_mbps: Option<u64>,
+        #[arg(long)]
+        down_mbps: Option<u64>,
+        #[arg(long, default_value_t = 15)]
+        cwnd_gain: u32,
+        #[arg(long)]
+        tag_label: Option<String>,
     },
 }
 
@@ -58,19 +131,45 @@ async fn main() -> Result<()> {
             mut sni,
             mut password,
             min_idle_session,
+            tcp_brutal_rate,
+            tcp_brutal_cwnd_gain,
         } => {
             parse_anytls_url(&mut server, &mut sni, &mut password)?;
             if server.is_empty() || password.is_empty() {
                 return Err(AnyTlsError::protocol("client requires -s and -p"));
             }
-            run_client(&listen, Client::new(server, sni, password_hash(&password), min_idle_session))
-                .await
+            let tcp_brutal = tcp_brutal_config(tcp_brutal_rate, tcp_brutal_cwnd_gain)?;
+            run_client(
+                &listen,
+                Client::new_with_tcp_brutal(
+                    server,
+                    sni,
+                    password_hash(&password),
+                    min_idle_session,
+                    tcp_brutal,
+                ),
+            )
+            .await
         }
         Command::Server {
+            config,
             listen,
             password,
             padding_scheme,
+            security,
+            reality_dest,
+            reality_server_names,
+            reality_private_key,
+            reality_public_key,
+            reality_short_ids,
+            reality_fingerprint,
+            tcp_brutal_rate,
+            tcp_brutal_cwnd_gain,
         } => {
+            if let Some(path) = config {
+                return run_server_config_file(&path).await;
+            }
+
             let padding = if let Some(path) = padding_scheme {
                 let raw = fs::read(&path)?;
                 PaddingFactory::new(&raw).ok_or_else(|| {
@@ -79,9 +178,348 @@ async fn main() -> Result<()> {
             } else {
                 PaddingFactory::default_scheme()
             };
-            Server::new(password_hash(&password), padding)?.listen(&listen).await
+            let tcp_brutal = tcp_brutal_config(tcp_brutal_rate, tcp_brutal_cwnd_gain)?;
+            let password = password.ok_or_else(|| AnyTlsError::protocol("server requires -p or --config"))?;
+            if security.eq_ignore_ascii_case("reality") {
+                let reality = RealityConfig {
+                    dest: reality_dest.ok_or_else(|| {
+                        AnyTlsError::protocol("reality server requires --reality-dest")
+                    })?,
+                    server_names: if reality_server_names.is_empty() {
+                        return Err(AnyTlsError::protocol(
+                            "reality server requires --reality-server-names",
+                        ));
+                    } else {
+                        reality_server_names
+                    },
+                    private_key: reality_private_key.ok_or_else(|| {
+                        AnyTlsError::protocol("reality server requires --reality-private-key")
+                    })?,
+                    public_key: reality_public_key,
+                    short_ids: reality_short_ids,
+                    fingerprint: reality_fingerprint,
+                };
+                Server::new_reality_with_tcp_brutal(
+                    password_hash(&password),
+                    padding,
+                    reality,
+                    tcp_brutal,
+                )?
+                    .listen(&listen)
+                    .await
+            } else {
+                Server::new_with_tcp_brutal(password_hash(&password), padding, tcp_brutal)?
+                    .listen(&listen)
+                    .await
+            }
+        }
+        Command::Generate { command } => run_generate(command),
+    }
+}
+
+async fn run_server_config_file(path: &str) -> Result<()> {
+    let config = ServerFileConfig::load(path)?;
+    let padding = if let Some(path) = &config.padding_scheme {
+        let raw = fs::read(path)?;
+        PaddingFactory::new(&raw).ok_or_else(|| {
+            AnyTlsError::protocol(format!("invalid padding scheme file: {path}"))
+        })?
+    } else {
+        PaddingFactory::default_scheme()
+    };
+
+    let tcp_brutal = config.tcp_brutal.to_server_tcp_brutal()?;
+    if config.security.eq_ignore_ascii_case("reality") {
+        let reality = config.reality.ok_or_else(|| {
+            AnyTlsError::protocol("reality server yaml config requires a reality section")
+        })?;
+        Server::new_reality_with_tcp_brutal(
+            password_hash(&config.password),
+            padding,
+            reality,
+            tcp_brutal,
+        )?
+        .listen(&config.listen)
+        .await
+    } else {
+        Server::new_with_tcp_brutal(password_hash(&config.password), padding, tcp_brutal)?
+            .listen(&config.listen)
+            .await
+    }
+}
+
+fn run_generate(command: GenerateCommand) -> Result<()> {
+    match command {
+        GenerateCommand::RealityKeypair => {
+            let (private_key, public_key) = generate_keypair();
+            println!("PrivateKey: {private_key}");
+            println!("PublicKey: {public_key}");
+            Ok(())
+        }
+        GenerateCommand::Rand { hex, base64 } => {
+            match (hex, base64) {
+                (Some(_), Some(_)) => Err(AnyTlsError::protocol(
+                    "generate rand accepts either --hex or --base64",
+                )),
+                (None, None) => Err(AnyTlsError::protocol(
+                    "generate rand requires --hex <bytes> or --base64 <bytes>",
+                )),
+                (Some(bytes), None) => {
+                    if bytes == 0 {
+                        return Err(AnyTlsError::protocol("random hex byte length must be greater than 0"));
+                    }
+                    println!("{}", random_hex(bytes));
+                    Ok(())
+                }
+                (None, Some(bytes)) => {
+                    if bytes == 0 {
+                        return Err(AnyTlsError::protocol("random base64 byte length must be greater than 0"));
+                    }
+                    println!("{}", random_base64(bytes));
+                    Ok(())
+                }
+            }
+        }
+        GenerateCommand::RealityServerConfig {
+            listen,
+            server,
+            port,
+            sni,
+            dest,
+            fingerprint,
+            password,
+            private_key,
+            short_id,
+            up_mbps,
+            down_mbps,
+            cwnd_gain,
+            tag_label,
+        } => {
+            let password = password.unwrap_or_else(|| random_base64(32));
+            let (private_key, public_key) = match private_key {
+                Some(private_key) => {
+                    let public_key = public_key_from_private_key(&private_key)
+                        .map_err(|err| AnyTlsError::protocol(err.to_string()))?;
+                    (private_key, public_key)
+                }
+                None => generate_keypair(),
+            };
+            let short_id = short_id.unwrap_or_default();
+            let reality_dest = dest.unwrap_or_else(|| format!("{sni}:443"));
+            let tcp_brutal = match (up_mbps, down_mbps) {
+                (Some(up_mbps), Some(down_mbps)) => {
+                    Some(ServerTcpBrutalConfig::enabled(up_mbps, down_mbps, cwnd_gain))
+                }
+                (None, None) => None,
+                _ => {
+                    return Err(AnyTlsError::protocol(
+                        "reality-server-config requires both --up-mbps and --down-mbps when enabling tcp brutal",
+                    ));
+                }
+            };
+
+            let server_config = ServerFileConfig {
+                listen: listen.clone(),
+                password: password.clone(),
+                padding_scheme: None,
+                security: "reality".to_string(),
+                reality: Some(RealityConfig {
+                    dest: reality_dest.clone(),
+                    server_names: vec![sni.clone()],
+                    private_key: private_key.clone(),
+                    public_key: Some(public_key.clone()),
+                    short_ids: vec![short_id.clone()],
+                    fingerprint: fingerprint.clone(),
+                }),
+                tcp_brutal: tcp_brutal.clone().unwrap_or_default(),
+            };
+
+            println!("# Generated values");
+            println!("server: {server}");
+            println!("port: {port}");
+            println!("password: {password}");
+            println!("private_key: {private_key}");
+            println!("public_key: {public_key}");
+            println!("short_id: {short_id}");
+            if let Some(tcp_brutal) = &tcp_brutal {
+                println!("tcp_brutal_up_mbps: {}", tcp_brutal.up_mbps.unwrap_or_default());
+                println!("tcp_brutal_down_mbps: {}", tcp_brutal.down_mbps.unwrap_or_default());
+            }
+            println!();
+
+            let final_tag = build_share_tag(tag_label.as_deref(), &server, "anyreality");
+            println!("# anytls uri");
+            println!(
+                "{}",
+                build_anytls_uri(
+                    &password,
+                    &server,
+                    port,
+                    "reality",
+                    &sni,
+                    &fingerprint,
+                    Some(&public_key),
+                    Some(&short_id),
+                    &final_tag,
+                )
+            );
+            println!();
+
+            println!("# anytls server yaml");
+            print!("{}", serde_yaml::to_string(&server_config).map_err(|err| {
+                AnyTlsError::protocol(format!("failed to serialize server yaml: {err}"))
+            })?);
+            println!();
+
+            println!("# anyreality client json");
+            let mut outbound = json!({
+                "type": "anyreality",
+                "tag": "anyreality",
+                "server": server,
+                "port": port,
+                "sni": sni,
+                "client-fingerprint": fingerprint,
+                "skip-cert-verify": false,
+                "reality-opts": {
+                    "public-key": public_key
+                },
+                "network": "tcp",
+                "password": password,
+                "security": "reality",
+                "fp": fingerprint,
+                "pbk": public_key,
+                "sid": short_id
+            });
+            if let Some(tcp_brutal) = tcp_brutal {
+                outbound["multiplex"] = json!({
+                    "enabled": true,
+                    "brutal": {
+                        "enabled": true,
+                        "up_mbps": tcp_brutal.up_mbps.unwrap_or_default(),
+                        "down_mbps": tcp_brutal.down_mbps.unwrap_or_default()
+                    }
+                });
+            }
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&outbound).map_err(|err| {
+                    AnyTlsError::protocol(format!("failed to serialize sing-box snippet: {err}"))
+                })?
+            );
+            println!();
+
+            println!("# Linux manual deployment helpers");
+            println!(
+                "cat > anyreality.yaml <<'EOF'\n{}EOF",
+                serde_yaml::to_string(&server_config).map_err(|err| {
+                    AnyTlsError::protocol(format!("failed to serialize server yaml: {err}"))
+                })?
+            );
+            println!("./anytls server --config anyreality.yaml");
+            if let Some(tcp_brutal) = server_config.tcp_brutal.enabled.then_some(server_config.tcp_brutal) {
+                let down_rate = mbps_to_bytes_per_second(tcp_brutal.down_mbps.unwrap_or_default())?;
+                println!("# tcp-brutal server send rate: {down_rate} bytes/s");
+            }
+            Ok(())
         }
     }
+}
+
+fn tcp_brutal_config(rate: Option<u64>, cwnd_gain: Option<u32>) -> Result<Option<TcpBrutalConfig>> {
+    match (rate, cwnd_gain) {
+        (None, None) => Ok(None),
+        (None, Some(_)) => Err(AnyTlsError::protocol(
+            "--tcp-brutal-cwnd-gain requires --tcp-brutal-rate",
+        )),
+        (Some(rate), cwnd_gain) => Ok(Some(TcpBrutalConfig::new(
+            rate,
+            cwnd_gain.unwrap_or(15),
+        )?)),
+    }
+}
+
+fn random_hex(bytes: usize) -> String {
+    let mut buffer = vec![0_u8; bytes];
+    OsRng.fill_bytes(&mut buffer);
+    hex::encode(buffer)
+}
+
+fn random_base64(bytes: usize) -> String {
+    let mut buffer = vec![0_u8; bytes];
+    OsRng.fill_bytes(&mut buffer);
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, buffer)
+}
+
+fn build_share_tag(tag_label: Option<&str>, server: &str, suffix: &str) -> String {
+    let label = tag_label
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(detect_local_hostname)
+        .unwrap_or_else(|| server.to_string());
+    let label = normalize_tag_segment(&label);
+    let mut parts = vec![label, "rust".to_string(), suffix.to_string()];
+    parts.retain(|part| !part.is_empty());
+    parts.join("-")
+}
+
+fn detect_local_hostname() -> Option<String> {
+    let output = ProcessCommand::new("hostname").arg("-s").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn normalize_tag_segment(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | '0'..='9' => ch,
+            'A'..='Z' => ch.to_ascii_lowercase(),
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn build_anytls_uri(
+    password: &str,
+    server: &str,
+    port: u16,
+    security: &str,
+    sni: &str,
+    fingerprint: &str,
+    public_key: Option<&str>,
+    short_id: Option<&str>,
+    tag: &str,
+) -> String {
+    let mut query = vec![
+        format!("security={security}"),
+        "type=tcp".to_string(),
+        format!("sni={sni}"),
+        format!("fp={fingerprint}"),
+    ];
+    if security == "reality" {
+        if let Some(public_key) = public_key {
+            query.push(format!("pbk={public_key}"));
+        }
+        query.push("network=tcp".to_string());
+        if let Some(short_id) = short_id {
+            query.push(format!("sid={short_id}"));
+        }
+    }
+    format!(
+        "anytls://{password}@{server}:{port}?{}#{tag}",
+        query.join("&")
+    )
 }
 
 fn parse_anytls_url(server: &mut String, sni: &mut String, password: &mut String) -> Result<()> {

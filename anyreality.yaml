@@ -1,0 +1,18 @@
+listen: 0.0.0.0:443
+password: CHANGE_ME_BASE64_PASSWORD
+padding_scheme: null
+security: reality
+reality:
+  dest: pypi.org:443
+  server_names:
+    - pypi.org
+  private_key: CHANGE_ME_REALITY_PRIVATE_KEY
+  public_key: CHANGE_ME_REALITY_PUBLIC_KEY
+  short_ids:
+    - ""
+  fingerprint: firefox
+tcp_brutal:
+  enabled: true
+  up_mbps: 300
+  down_mbps: 300
+  cwnd_gain: 15

@@ -1,0 +1,16 @@
+[Unit]
+Description=anytls anyreality server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/anytls
+ExecStart=/opt/anytls/anytls server --config /opt/anytls/anyreality.yaml
+Restart=always
+RestartSec=3
+Environment=RUST_LOG=anytls=debug,info
+
+[Install]
+WantedBy=multi-user.target

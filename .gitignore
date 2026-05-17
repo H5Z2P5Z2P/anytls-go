@@ -5,3 +5,7 @@
 *.exe
 *.zip
 .vscode
+*.log
+*.pid
+*.env
+anyreality.local.yaml

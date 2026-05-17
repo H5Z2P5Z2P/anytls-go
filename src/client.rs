@@ -17,6 +17,7 @@ use crate::error::Result;
 use crate::padding::PaddingFactory;
 use crate::session::{Session, SharedPadding, Stream};
 use crate::socks_addr::SocksAddr;
+use crate::tcp_brutal::{TcpBrutalConfig, apply_to_stream};
 use crate::tls::{client_config_insecure, server_name};
 
 pub trait ClientTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
@@ -56,15 +57,31 @@ impl Client {
         password_hash: [u8; PASSWORD_HASH_LEN],
         min_idle_session: usize,
     ) -> Self {
+        Self::new_with_tcp_brutal(server_addr, sni, password_hash, min_idle_session, None)
+    }
+
+    pub fn new_with_tcp_brutal(
+        server_addr: impl Into<String>,
+        sni: impl Into<String>,
+        password_hash: [u8; PASSWORD_HASH_LEN],
+        min_idle_session: usize,
+        tcp_brutal: Option<TcpBrutalConfig>,
+    ) -> Self {
         let server_addr = server_addr.into();
         let sni = sni.into();
         let dial_server_addr = server_addr.clone();
         let dial_sni = sni.clone();
+        let dial_tcp_brutal = tcp_brutal;
         let dialer: Arc<Dialer> = Arc::new(move || {
             let server_addr = dial_server_addr.clone();
             let sni = dial_sni.clone();
+            let tcp_brutal = dial_tcp_brutal;
             Box::pin(async move {
                 let tcp = TcpStream::connect(&server_addr).await?;
+                if let Some(config) = tcp_brutal {
+                    apply_to_stream(&tcp, config)?;
+                    info!(rate = config.rate, cwnd_gain = config.cwnd_gain, "enabled tcp brutal on client anytls transport");
+                }
                 let connector = TlsConnector::from(client_config_insecure());
                 let tls = connector.connect(server_name(&sni)?, tcp).await?;
                 Ok(Box::new(tls) as BoxedTransport)
