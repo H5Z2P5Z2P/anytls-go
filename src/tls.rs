@@ -1,3 +1,4 @@
+use std::fs;
 use std::sync::Arc;
 
 use rcgen::generate_simple_self_signed;
@@ -37,6 +38,32 @@ pub fn self_signed_server_config() -> Result<Arc<ServerConfig>> {
         ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert_der], key)?,
+    ))
+}
+
+pub fn server_config_from_paths(certificate_path: &str, key_path: &str) -> Result<Arc<ServerConfig>> {
+    let cert_pem = fs::read(certificate_path)?;
+    let key_pem = fs::read(key_path)?;
+
+    let certificates = rustls_pemfile::certs(&mut cert_pem.as_slice())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|err| AnyTlsError::protocol(format!("failed to parse certificate PEM: {err}")))?;
+    if certificates.is_empty() {
+        return Err(AnyTlsError::protocol("no certificates found in certificate_path"));
+    }
+
+    let mut pkcs8_keys = rustls_pemfile::pkcs8_private_keys(&mut key_pem.as_slice())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|err| AnyTlsError::protocol(format!("failed to parse private key PEM: {err}")))?;
+    let key = pkcs8_keys
+        .drain(..)
+        .next()
+        .ok_or_else(|| AnyTlsError::protocol("no PKCS#8 private key found in key_path"))?;
+
+    Ok(Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certificates, PrivateKeyDer::Pkcs8(key))?,
     ))
 }
 

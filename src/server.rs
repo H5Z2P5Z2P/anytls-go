@@ -12,7 +12,7 @@ use crate::reality::{RealityConfig, RealityServer};
 use crate::session::{Session, SharedPadding, Stream};
 use crate::socks_addr::SocksAddr;
 use crate::tcp_brutal::{TcpBrutalConfig, apply_to_stream};
-use crate::tls::self_signed_server_config;
+use crate::tls::{self_signed_server_config, server_config_from_paths};
 use crate::uot::{MAGIC_ADDRESS, relay_server_stream};
 
 pub struct Server {
@@ -41,6 +41,24 @@ impl Server {
             password_hash,
             padding: SharedPadding::new(padding),
             security: ServerSecurity::Tls(TlsAcceptor::from(self_signed_server_config()?)),
+            tcp_brutal,
+        })
+    }
+
+    pub fn new_tls_with_tcp_brutal(
+        password_hash: [u8; PASSWORD_HASH_LEN],
+        padding: PaddingFactory,
+        certificate_path: &str,
+        key_path: &str,
+        tcp_brutal: Option<TcpBrutalConfig>,
+    ) -> Result<Self> {
+        Ok(Self {
+            password_hash,
+            padding: SharedPadding::new(padding),
+            security: ServerSecurity::Tls(TlsAcceptor::from(server_config_from_paths(
+                certificate_path,
+                key_path,
+            )?)),
             tcp_brutal,
         })
     }

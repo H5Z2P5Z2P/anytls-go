@@ -29,6 +29,7 @@ rcgen12 = { package = "rcgen", version = "0.12.1" }
 ring = "0.17"
 rustls = "0.22"
 rustls-pki-types = "1"
+rustls-pemfile = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

@@ -21,9 +21,18 @@ pub struct ServerFileConfig {
     #[serde(default = "default_server_security")]
     pub security: String,
     #[serde(default)]
+    pub tls: Option<TlsConfig>,
+    #[serde(default)]
     pub reality: Option<RealityConfig>,
     #[serde(default)]
     pub tcp_brutal: ServerTcpBrutalConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TlsConfig {
+    pub server_name: String,
+    pub certificate_path: String,
+    pub key_path: String,
 }
 
 impl ServerFileConfig {
@@ -136,6 +145,27 @@ tcp_brutal:
         assert_eq!(config.security, "reality");
         assert_eq!(config.reality.unwrap().server_names, vec!["pypi.org"]);
         assert_eq!(config.tcp_brutal.down_mbps, Some(50));
+    }
+
+    #[test]
+    fn server_yaml_parses_tls_section() {
+        let config: ServerFileConfig = serde_yaml::from_str(
+            r#"
+listen: 0.0.0.0:10443
+password: secret
+security: tls
+tls:
+  server_name: green.hhdaisy.com
+  certificate_path: /etc/ssl/certimate/cert.crt
+  key_path: /etc/ssl/certimate/cert.key
+"#,
+        )
+        .unwrap();
+
+        let tls = config.tls.unwrap();
+        assert_eq!(tls.server_name, "green.hhdaisy.com");
+        assert_eq!(tls.certificate_path, "/etc/ssl/certimate/cert.crt");
+        assert_eq!(tls.key_path, "/etc/ssl/certimate/cert.key");
     }
 
     #[test]

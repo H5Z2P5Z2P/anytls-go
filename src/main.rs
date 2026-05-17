@@ -4,7 +4,7 @@ use std::process::Command as ProcessCommand;
 
 use anytls::auth::password_hash;
 use anytls::client::Client;
-use anytls::config::{ServerFileConfig, ServerTcpBrutalConfig, mbps_to_bytes_per_second};
+use anytls::config::{ServerFileConfig, ServerTcpBrutalConfig, TlsConfig, mbps_to_bytes_per_second};
 use anytls::error::{AnyTlsError, Result};
 use anytls::logging::init_tracing;
 use anytls::padding::PaddingFactory;
@@ -242,10 +242,33 @@ async fn run_server_config_file(path: &str) -> Result<()> {
         .listen(&config.listen)
         .await
     } else {
-        Server::new_with_tcp_brutal(password_hash(&config.password), padding, tcp_brutal)?
-            .listen(&config.listen)
-            .await
+        let tls = config.tls.ok_or_else(|| {
+            AnyTlsError::protocol("tls server yaml config requires a tls section")
+        })?;
+        validate_tls_config(&tls)?;
+        Server::new_tls_with_tcp_brutal(
+            password_hash(&config.password),
+            padding,
+            &tls.certificate_path,
+            &tls.key_path,
+            tcp_brutal,
+        )?
+        .listen(&config.listen)
+        .await
     }
+}
+
+fn validate_tls_config(tls: &TlsConfig) -> Result<()> {
+    if tls.server_name.trim().is_empty() {
+        return Err(AnyTlsError::protocol("tls.server_name cannot be empty"));
+    }
+    if tls.certificate_path.trim().is_empty() {
+        return Err(AnyTlsError::protocol("tls.certificate_path cannot be empty"));
+    }
+    if tls.key_path.trim().is_empty() {
+        return Err(AnyTlsError::protocol("tls.key_path cannot be empty"));
+    }
+    Ok(())
 }
 
 fn run_generate(command: GenerateCommand) -> Result<()> {
@@ -323,6 +346,7 @@ fn run_generate(command: GenerateCommand) -> Result<()> {
                 password: password.clone(),
                 padding_scheme: None,
                 security: "reality".to_string(),
+                tls: None,
                 reality: Some(RealityConfig {
                     dest: reality_dest.clone(),
                     server_names: vec![sni.clone()],
