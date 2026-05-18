@@ -44,7 +44,12 @@ async fn rust_client_interops_with_anytls_go_server() {
 
     wait_for_tcp_listener(server_addr).await;
 
-    let client = Client::new(server_addr.to_string(), "localhost", password_hash("secret"), 0);
+    let client = Client::new(
+        server_addr.to_string(),
+        "localhost",
+        password_hash("secret"),
+        0,
+    );
     let mut proxy = client
         .create_proxy_stream(&SocksAddr::Ip(echo_addr))
         .await

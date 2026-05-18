@@ -6,6 +6,7 @@ use tokio_rustls::TlsAcceptor;
 use tracing::{debug, info, warn};
 
 use crate::auth::{PASSWORD_HASH_LEN, read_and_verify_auth};
+use crate::dialer::connect_tcp;
 use crate::error::Result;
 use crate::padding::PaddingFactory;
 use crate::reality::{RealityConfig, RealityServer};
@@ -121,16 +122,17 @@ impl Server {
                 let mut tls = acceptor.accept(tcp).await?;
                 read_and_verify_auth(&mut tls, &self.password_hash).await?;
                 info!(peer_addr = ?peer_addr, "client authenticated over tls");
-                let session = Session::new_server(tls, self.padding.clone(), move |stream| async move {
-                    if let Err(err) = handle_stream(stream).await {
-                        if is_expected_stream_end(&err) {
-                            debug!(error = %err, "server stream ended normally");
-                        } else {
-                            warn!(error = %err, "server stream ended with error");
+                let session =
+                    Session::new_server(tls, self.padding.clone(), move |stream| async move {
+                        if let Err(err) = handle_stream(stream).await {
+                            if is_expected_stream_end(&err) {
+                                debug!(error = %err, "server stream ended normally");
+                            } else {
+                                warn!(error = %err, "server stream ended with error");
+                            }
                         }
-                    }
-                })
-                .await;
+                    })
+                    .await;
                 session.closed().await;
                 info!(peer_addr = ?peer_addr, "session closed");
                 Ok(())
@@ -142,16 +144,17 @@ impl Server {
                     .map_err(|err| crate::AnyTlsError::protocol(err.to_string()))?;
                 read_and_verify_auth(&mut tls, &self.password_hash).await?;
                 info!(peer_addr = ?peer_addr, "client authenticated over reality");
-                let session = Session::new_server(tls, self.padding.clone(), move |stream| async move {
-                    if let Err(err) = handle_stream(stream).await {
-                        if is_expected_stream_end(&err) {
-                            debug!(error = %err, "server stream ended normally");
-                        } else {
-                            warn!(error = %err, "server stream ended with error");
+                let session =
+                    Session::new_server(tls, self.padding.clone(), move |stream| async move {
+                        if let Err(err) = handle_stream(stream).await {
+                            if is_expected_stream_end(&err) {
+                                debug!(error = %err, "server stream ended normally");
+                            } else {
+                                warn!(error = %err, "server stream ended with error");
+                            }
                         }
-                    }
-                })
-                .await;
+                    })
+                    .await;
                 session.closed().await;
                 info!(peer_addr = ?peer_addr, "session closed");
                 Ok(())
@@ -169,7 +172,7 @@ async fn handle_stream(mut stream: Stream) -> Result<()> {
         return Ok(());
     }
 
-    let mut outbound = match TcpStream::connect(destination.to_string()).await {
+    let mut outbound = match connect_tcp(&destination).await {
         Ok(outbound) => outbound,
         Err(err) => {
             warn!(stream_id = stream.id(), destination = %destination, error = %err, "outbound tcp connect failed");

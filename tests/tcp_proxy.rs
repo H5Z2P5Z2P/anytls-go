@@ -38,7 +38,9 @@ async fn client_proxies_tcp_through_anytls_session() {
                 let destination = SocksAddr::read_from(&mut stream).await.unwrap();
                 let mut outbound = TcpStream::connect(destination.to_string()).await.unwrap();
                 stream.report_handshake_success().await.unwrap();
-                let _ = copy_bidirectional(&mut stream, &mut outbound).await.unwrap();
+                let _ = copy_bidirectional(&mut stream, &mut outbound)
+                    .await
+                    .unwrap();
             },
         )
         .await;

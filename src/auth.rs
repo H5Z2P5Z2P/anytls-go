@@ -10,7 +10,10 @@ pub fn password_hash(password: &str) -> [u8; PASSWORD_HASH_LEN] {
     Sha256::digest(password.as_bytes()).into()
 }
 
-pub fn build_auth_request(password_hash: &[u8; PASSWORD_HASH_LEN], padding: &PaddingFactory) -> Vec<u8> {
+pub fn build_auth_request(
+    password_hash: &[u8; PASSWORD_HASH_LEN],
+    padding: &PaddingFactory,
+) -> Vec<u8> {
     let padding_len = padding
         .generate_record_payload_sizes(0)
         .first()
@@ -32,7 +35,9 @@ pub async fn write_auth_request<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    writer.write_all(&build_auth_request(password_hash, padding)).await?;
+    writer
+        .write_all(&build_auth_request(password_hash, padding))
+        .await?;
     Ok(())
 }
 
@@ -86,7 +91,9 @@ mod tests {
         let request = build_auth_request(&actual, &padding);
         let mut reader = tokio::io::BufReader::new(request.as_slice());
 
-        let err = read_and_verify_auth(&mut reader, &expected).await.unwrap_err();
+        let err = read_and_verify_auth(&mut reader, &expected)
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, AnyTlsError::AuthenticationFailed));
     }

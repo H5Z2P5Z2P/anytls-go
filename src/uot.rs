@@ -110,7 +110,14 @@ where
     loop {
         let (n, addr) = socket.recv_from(&mut buffer).await?;
         let source = SocksAddr::Ip(addr);
-        let packet = encode_packet(if request.is_connect { None } else { Some(&source) }, &buffer[..n])?;
+        let packet = encode_packet(
+            if request.is_connect {
+                None
+            } else {
+                Some(&source)
+            },
+            &buffer[..n],
+        )?;
         if let Err(err) = writer.write_all(&packet).await {
             uplink.abort();
             return Err(err.into());
@@ -124,7 +131,9 @@ async fn resolve_udp_addr(destination: &SocksAddr) -> Result<SocketAddr> {
         SocksAddr::Domain { host, port } => lookup_host((host.as_str(), *port))
             .await?
             .next()
-            .ok_or_else(|| AnyTlsError::protocol(format!("failed to resolve udp address: {host}:{port}"))),
+            .ok_or_else(|| {
+                AnyTlsError::protocol(format!("failed to resolve udp address: {host}:{port}"))
+            }),
     }
 }
 

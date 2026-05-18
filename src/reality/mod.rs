@@ -2,7 +2,10 @@ mod hello_parser;
 mod server_rustls;
 
 use anyhow::{Result, anyhow};
-use base64::{Engine as _, engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -122,6 +125,9 @@ mod tests {
     #[test]
     fn generated_keypair_round_trips_public_key_derivation() {
         let (private_key, public_key) = generate_keypair();
-        assert_eq!(public_key_from_private_key(&private_key).unwrap(), public_key);
+        assert_eq!(
+            public_key_from_private_key(&private_key).unwrap(),
+            public_key
+        );
     }
 }

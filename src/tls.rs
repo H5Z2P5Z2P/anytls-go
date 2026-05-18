@@ -42,7 +42,10 @@ pub fn self_signed_server_config() -> Result<Arc<ServerConfig>> {
     ))
 }
 
-pub fn server_config_from_paths(certificate_path: &str, key_path: &str) -> Result<Arc<ServerConfig>> {
+pub fn server_config_from_paths(
+    certificate_path: &str,
+    key_path: &str,
+) -> Result<Arc<ServerConfig>> {
     let cert_pem = fs::read(certificate_path)?;
     let key_pem = fs::read(key_path)?;
 
@@ -50,7 +53,9 @@ pub fn server_config_from_paths(certificate_path: &str, key_path: &str) -> Resul
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|err| AnyTlsError::protocol(format!("failed to parse certificate PEM: {err}")))?;
     if certificates.is_empty() {
-        return Err(AnyTlsError::protocol("no certificates found in certificate_path"));
+        return Err(AnyTlsError::protocol(
+            "no certificates found in certificate_path",
+        ));
     }
 
     let key = private_key_from_pem(&key_pem)?;
@@ -65,8 +70,9 @@ pub fn server_config_from_paths(certificate_path: &str, key_path: &str) -> Resul
 fn private_key_from_pem(pem: &[u8]) -> Result<PrivateKeyDer<'static>> {
     let mut reader = io::BufReader::new(pem);
     loop {
-        let item = rustls_pemfile::read_one(&mut reader)
-            .map_err(|err| AnyTlsError::protocol(format!("failed to parse private key PEM: {err}")))?;
+        let item = rustls_pemfile::read_one(&mut reader).map_err(|err| {
+            AnyTlsError::protocol(format!("failed to parse private key PEM: {err}"))
+        })?;
         match item {
             Some(rustls_pemfile::Item::Pkcs8Key(key)) => return Ok(PrivateKeyDer::Pkcs8(key)),
             Some(rustls_pemfile::Item::Pkcs1Key(key)) => return Ok(PrivateKeyDer::Pkcs1(key)),
@@ -75,7 +81,7 @@ fn private_key_from_pem(pem: &[u8]) -> Result<PrivateKeyDer<'static>> {
             None => {
                 return Err(AnyTlsError::protocol(
                     "no supported private key found in key_path; expected PKCS#8, PKCS#1, or SEC1 PEM",
-                ))
+                ));
             }
         }
     }
@@ -96,8 +102,9 @@ mod tests {
 
     #[test]
     fn tls_loader_rejects_missing_private_key() {
-        let err = private_key_from_pem(b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
-            .unwrap_err();
+        let err =
+            private_key_from_pem(b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+                .unwrap_err();
         assert!(err.to_string().contains("no supported private key found"));
     }
 }

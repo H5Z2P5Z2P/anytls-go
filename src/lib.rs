@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod client;
 pub mod config;
+pub mod dialer;
 pub mod error;
 pub mod frame;
 pub mod logging;

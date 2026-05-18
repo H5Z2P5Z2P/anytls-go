@@ -28,10 +28,17 @@ async fn client_proxies_udp_over_anytls_uot() {
 
     let socks_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socks_addr = socks_listener.local_addr().unwrap();
-    let client = Client::new(server_addr.to_string(), "localhost", password_hash("secret"), 0);
+    let client = Client::new(
+        server_addr.to_string(),
+        "localhost",
+        password_hash("secret"),
+        0,
+    );
     tokio::spawn(async move {
         let (inbound, _) = socks_listener.accept().await.unwrap();
-        super_handle_socks5_udp_associate(inbound, client).await.unwrap();
+        super_handle_socks5_udp_associate(inbound, client)
+            .await
+            .unwrap();
     });
 
     let mut tcp = TcpStream::connect(socks_addr).await.unwrap();
@@ -45,12 +52,21 @@ async fn client_proxies_udp_over_anytls_uot() {
     let mut response = [0_u8; 10];
     tcp.read_exact(&mut response).await.unwrap();
     assert_eq!(response[1], 0);
-    let udp_bind_addr = std::net::SocketAddr::from(([response[4], response[5], response[6], response[7]], u16::from_be_bytes([response[8], response[9]])));
+    let udp_bind_addr = std::net::SocketAddr::from((
+        [response[4], response[5], response[6], response[7]],
+        u16::from_be_bytes([response[8], response[9]]),
+    ));
 
     let udp_client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let packet = [
         vec![0, 0, 0, 1],
-        udp_echo_addr.ip().to_string().parse::<std::net::Ipv4Addr>().unwrap().octets().to_vec(),
+        udp_echo_addr
+            .ip()
+            .to_string()
+            .parse::<std::net::Ipv4Addr>()
+            .unwrap()
+            .octets()
+            .to_vec(),
         udp_echo_addr.port().to_be_bytes().to_vec(),
         b"ping".to_vec(),
     ]
@@ -63,7 +79,10 @@ async fn client_proxies_udp_over_anytls_uot() {
     assert_eq!(&recv_buf[n - 4..n], b"ping");
 }
 
-async fn super_handle_socks5_udp_associate(inbound: TcpStream, client: Client) -> anytls::Result<()> {
+async fn super_handle_socks5_udp_associate(
+    inbound: TcpStream,
+    client: Client,
+) -> anytls::Result<()> {
     let mut inbound = inbound;
     let version = inbound.read_u8().await?;
     assert_eq!(version, 5);
@@ -92,10 +111,15 @@ async fn super_handle_socks5_udp_associate(inbound: TcpStream, client: Client) -
     };
     inbound.write_all(&bind).await?;
 
-    let mut uot = client.create_proxy_stream(&anytls::uot::request_destination()).await?;
+    let mut uot = client
+        .create_proxy_stream(&anytls::uot::request_destination())
+        .await?;
     anytls::uot::Request {
         is_connect: false,
-        destination: anytls::socks_addr::SocksAddr::Ip(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
+        destination: anytls::socks_addr::SocksAddr::Ip(std::net::SocketAddr::from((
+            [0, 0, 0, 0],
+            0,
+        ))),
     }
     .write_to(uot.stream_mut())
     .await?;
@@ -141,7 +165,9 @@ async fn super_handle_socks5_udp_associate(inbound: TcpStream, client: Client) -
     Ok(())
 }
 
-fn decode_test_socks5_udp_packet(packet: &[u8]) -> anytls::Result<(Vec<u8>, anytls::socks_addr::SocksAddr)> {
+fn decode_test_socks5_udp_packet(
+    packet: &[u8],
+) -> anytls::Result<(Vec<u8>, anytls::socks_addr::SocksAddr)> {
     if packet.len() < 10 {
         return Err(anytls::AnyTlsError::protocol("short udp packet"));
     }
@@ -153,7 +179,10 @@ fn decode_test_socks5_udp_packet(packet: &[u8]) -> anytls::Result<(Vec<u8>, anyt
     ))
 }
 
-fn encode_test_socks5_udp_packet(source: &anytls::socks_addr::SocksAddr, payload: &[u8]) -> anytls::Result<Vec<u8>> {
+fn encode_test_socks5_udp_packet(
+    source: &anytls::socks_addr::SocksAddr,
+    payload: &[u8],
+) -> anytls::Result<Vec<u8>> {
     let mut packet = vec![0, 0, 0];
     packet.extend_from_slice(&source.to_bytes()?);
     packet.extend_from_slice(payload);

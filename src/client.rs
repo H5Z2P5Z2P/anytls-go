@@ -80,7 +80,11 @@ impl Client {
                 let tcp = TcpStream::connect(&server_addr).await?;
                 if let Some(config) = tcp_brutal {
                     apply_to_stream(&tcp, config)?;
-                    info!(rate = config.rate, cwnd_gain = config.cwnd_gain, "enabled tcp brutal on client anytls transport");
+                    info!(
+                        rate = config.rate,
+                        cwnd_gain = config.cwnd_gain,
+                        "enabled tcp brutal on client anytls transport"
+                    );
                 }
                 let connector = TlsConnector::from(client_config_insecure());
                 let tls = connector.connect(server_name(&sni)?, tcp).await?;
@@ -178,7 +182,11 @@ impl Client {
         let session = Session::new_client(transport, self.inner.padding.clone()).await?;
         let seq = self.inner.session_counter.fetch_add(1, Ordering::SeqCst) + 1;
         session.set_seq(seq);
-        self.inner.sessions.lock().await.insert(seq, session.clone());
+        self.inner
+            .sessions
+            .lock()
+            .await
+            .insert(seq, session.clone());
 
         let client = self.clone();
         let tracked_session = session.clone();
@@ -237,7 +245,10 @@ impl Client {
             }
 
             if let Some(idle) = idle_sessions.remove(&seq) {
-                debug!(session_seq = idle.session.seq(), "closing expired idle session");
+                debug!(
+                    session_seq = idle.session.seq(),
+                    "closing expired idle session"
+                );
                 to_close.push(idle.session);
             }
         }
@@ -254,7 +265,10 @@ impl Client {
 
         let idle_sessions = {
             let mut idle = self.inner.idle_sessions.lock().await;
-            let sessions = idle.values().map(|entry| entry.session.clone()).collect::<Vec<_>>();
+            let sessions = idle
+                .values()
+                .map(|entry| entry.session.clone())
+                .collect::<Vec<_>>();
             idle.clear();
             sessions
         };
@@ -276,7 +290,10 @@ impl Client {
         );
 
         let mut seen = std::collections::HashSet::new();
-        for session in idle_sessions.into_iter().chain(tracked_sessions.into_iter()) {
+        for session in idle_sessions
+            .into_iter()
+            .chain(tracked_sessions.into_iter())
+        {
             if seen.insert(session.seq()) {
                 session.close().await;
             }
@@ -324,14 +341,20 @@ impl ProxyStream {
         } = self;
         let _ = stream.shutdown().await;
         drop(stream);
-        debug!(session_seq = session.seq(), "releasing proxy stream and returning session");
+        debug!(
+            session_seq = session.seq(),
+            "releasing proxy stream and returning session"
+        );
         client.release_session(session).await;
     }
 }
 
 impl ProxyStreamLease {
     pub async fn release(self) {
-        debug!(session_seq = self.session.seq(), "releasing leased proxy stream session");
+        debug!(
+            session_seq = self.session.seq(),
+            "releasing leased proxy stream session"
+        );
         self.client.release_session(self.session).await;
     }
 }
@@ -372,7 +395,11 @@ mod tests {
         let dialer: Arc<Dialer> = Arc::new(move || {
             let queue = queue_for_dialer.clone();
             Box::pin(async move {
-                let stream = queue.lock().await.pop_front().expect("missing test transport");
+                let stream = queue
+                    .lock()
+                    .await
+                    .pop_front()
+                    .expect("missing test transport");
                 Ok(Box::new(stream) as BoxedTransport)
             }) as DialFuture
         });
@@ -414,7 +441,11 @@ mod tests {
         let dialer: Arc<Dialer> = Arc::new(move || {
             let queue = queue_for_dialer.clone();
             Box::pin(async move {
-                let stream = queue.lock().await.pop_front().expect("missing test transport");
+                let stream = queue
+                    .lock()
+                    .await
+                    .pop_front()
+                    .expect("missing test transport");
                 Ok(Box::new(stream) as BoxedTransport)
             }) as DialFuture
         });
@@ -446,11 +477,12 @@ mod tests {
                 io.read_exact(&mut padding).await.unwrap();
             }
 
-            let session = Session::new_server(io, SharedPadding::default(), |mut stream| async move {
-                let _ = SocksAddr::read_from(&mut stream).await.unwrap();
-                stream.write_all(b"ok").await.unwrap();
-            })
-            .await;
+            let session =
+                Session::new_server(io, SharedPadding::default(), |mut stream| async move {
+                    let _ = SocksAddr::read_from(&mut stream).await.unwrap();
+                    stream.write_all(b"ok").await.unwrap();
+                })
+                .await;
             session.closed().await;
         })
     }

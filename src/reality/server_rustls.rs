@@ -28,7 +28,9 @@ struct CertKey {
 }
 
 static CERT_CACHE: Lazy<Mutex<LruCache<CertKey, (Vec<u8>, Vec<u8>, Vec<u8>)>>> = Lazy::new(|| {
-    Mutex::new(LruCache::new(std::num::NonZeroUsize::new(100).expect("nonzero")))
+    Mutex::new(LruCache::new(
+        std::num::NonZeroUsize::new(100).expect("nonzero"),
+    ))
 });
 
 pub struct RealityServerRustls {
@@ -54,7 +56,8 @@ impl RealityServerRustls {
     ) -> Result<Self> {
         let mut short_ids_bytes = Vec::new();
         for short_id in short_ids {
-            short_ids_bytes.push(hex::decode(&short_id).map_err(|err| anyhow!("invalid shortId hex: {err}"))?);
+            short_ids_bytes
+                .push(hex::decode(&short_id).map_err(|err| anyhow!("invalid shortId hex: {err}"))?);
         }
 
         let reality_config = RealityConfig::new(private_key)
@@ -193,7 +196,8 @@ impl RealityServerRustls {
         let mut server_priv = [0_u8; 32];
         server_priv.copy_from_slice(&self.reality_config.private_key);
         let client_pub: [u8; 32] = info.public_key.as_ref()?.as_slice().try_into().ok()?;
-        let shared = StaticSecret::from(server_priv).diffie_hellman(&X25519PublicKey::from(client_pub));
+        let shared =
+            StaticSecret::from(server_priv).diffie_hellman(&X25519PublicKey::from(client_pub));
 
         let hk = Hkdf::<Sha256>::new(Some(&info.client_random[0..20]), shared.as_bytes());
         let mut auth_key = [0_u8; 32];
@@ -209,7 +213,10 @@ impl RealityServerRustls {
             full_hello
         };
         let mut aad = handshake_msg.to_vec();
-        if let Some(pos) = hex::encode(&aad).find(&hex::encode(&info.session_id)).map(|pos| pos / 2) {
+        if let Some(pos) = hex::encode(&aad)
+            .find(&hex::encode(&info.session_id))
+            .map(|pos| pos / 2)
+        {
             for idx in 0..32 {
                 if pos + idx < aad.len() {
                     aad[pos + idx] = 0;
@@ -256,7 +263,8 @@ impl RealityServerRustls {
                     .map_err(|err| anyhow!("certificate serialization failed: {err}"))?;
                 let private_key_der = cert.serialize_private_key_der();
 
-                let tuple: (Vec<u8>, Vec<u8>, Vec<u8>) = (cert_der, private_key_der, public_key_raw);
+                let tuple: (Vec<u8>, Vec<u8>, Vec<u8>) =
+                    (cert_der, private_key_der, public_key_raw);
                 cache.put(cache_key.clone(), tuple.clone());
                 tuple
             }
@@ -352,10 +360,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for PrefixedStream<S> {
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }

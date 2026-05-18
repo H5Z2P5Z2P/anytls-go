@@ -1,7 +1,7 @@
 use tokio::net::TcpStream;
 
-use crate::error::Result;
 use crate::AnyTlsError;
+use crate::error::Result;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TcpBrutalConfig {
@@ -47,9 +47,9 @@ mod linux {
 
     use tokio::net::TcpStream;
 
+    use crate::AnyTlsError;
     use crate::error::Result;
     use crate::tcp_brutal::TcpBrutalConfig;
-    use crate::AnyTlsError;
 
     const TCP_BRUTAL_PARAMS: libc::c_int = 23301;
 
@@ -76,7 +76,12 @@ mod linux {
         bytes
     }
 
-    fn set_sockopt(fd: libc::c_int, level: libc::c_int, optname: libc::c_int, value: &[u8]) -> io::Result<()> {
+    fn set_sockopt(
+        fd: libc::c_int,
+        level: libc::c_int,
+        optname: libc::c_int,
+        value: &[u8],
+    ) -> io::Result<()> {
         let ret = unsafe {
             libc::setsockopt(
                 fd,

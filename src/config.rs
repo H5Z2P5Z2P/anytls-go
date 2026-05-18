@@ -2,10 +2,10 @@ use std::fs;
 
 use serde::{Deserialize, Serialize};
 
+use crate::AnyTlsError;
 use crate::error::Result;
 use crate::reality::RealityConfig;
 use crate::tcp_brutal::TcpBrutalConfig;
-use crate::AnyTlsError;
 
 pub const DEFAULT_SERVER_LISTEN: &str = "0.0.0.0:8443";
 pub const DEFAULT_SERVER_SECURITY: &str = "tls";

@@ -273,6 +273,7 @@
 //!
 
 // Require docs for public APIs, deny unsafe code, etc.
+#![allow(unexpected_cfgs, mismatched_lifetime_syntaxes)]
 #![forbid(unsafe_code, unused_must_use)]
 #![cfg_attr(not(any(read_buf, bench)), forbid(unstable_features))]
 // #![deny(

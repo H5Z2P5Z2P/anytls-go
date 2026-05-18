@@ -4,7 +4,9 @@ use std::process::Command as ProcessCommand;
 
 use anytls::auth::password_hash;
 use anytls::client::Client;
-use anytls::config::{ServerFileConfig, ServerTcpBrutalConfig, TlsConfig, mbps_to_bytes_per_second};
+use anytls::config::{
+    ServerFileConfig, ServerTcpBrutalConfig, TlsConfig, mbps_to_bytes_per_second,
+};
 use anytls::error::{AnyTlsError, Result};
 use anytls::logging::init_tracing;
 use anytls::padding::PaddingFactory;
@@ -179,7 +181,8 @@ async fn main() -> Result<()> {
                 PaddingFactory::default_scheme()
             };
             let tcp_brutal = tcp_brutal_config(tcp_brutal_rate, tcp_brutal_cwnd_gain)?;
-            let password = password.ok_or_else(|| AnyTlsError::protocol("server requires -p or --config"))?;
+            let password =
+                password.ok_or_else(|| AnyTlsError::protocol("server requires -p or --config"))?;
             if security.eq_ignore_ascii_case("reality") {
                 let reality = RealityConfig {
                     dest: reality_dest.ok_or_else(|| {
@@ -205,8 +208,8 @@ async fn main() -> Result<()> {
                     reality,
                     tcp_brutal,
                 )?
-                    .listen(&listen)
-                    .await
+                .listen(&listen)
+                .await
             } else {
                 Server::new_with_tcp_brutal(password_hash(&password), padding, tcp_brutal)?
                     .listen(&listen)
@@ -221,9 +224,8 @@ async fn run_server_config_file(path: &str) -> Result<()> {
     let config = ServerFileConfig::load(path)?;
     let padding = if let Some(path) = &config.padding_scheme {
         let raw = fs::read(path)?;
-        PaddingFactory::new(&raw).ok_or_else(|| {
-            AnyTlsError::protocol(format!("invalid padding scheme file: {path}"))
-        })?
+        PaddingFactory::new(&raw)
+            .ok_or_else(|| AnyTlsError::protocol(format!("invalid padding scheme file: {path}")))?
     } else {
         PaddingFactory::default_scheme()
     };
@@ -263,7 +265,9 @@ fn validate_tls_config(tls: &TlsConfig) -> Result<()> {
         return Err(AnyTlsError::protocol("tls.server_name cannot be empty"));
     }
     if tls.certificate_path.trim().is_empty() {
-        return Err(AnyTlsError::protocol("tls.certificate_path cannot be empty"));
+        return Err(AnyTlsError::protocol(
+            "tls.certificate_path cannot be empty",
+        ));
     }
     if tls.key_path.trim().is_empty() {
         return Err(AnyTlsError::protocol("tls.key_path cannot be empty"));
@@ -279,30 +283,32 @@ fn run_generate(command: GenerateCommand) -> Result<()> {
             println!("PublicKey: {public_key}");
             Ok(())
         }
-        GenerateCommand::Rand { hex, base64 } => {
-            match (hex, base64) {
-                (Some(_), Some(_)) => Err(AnyTlsError::protocol(
-                    "generate rand accepts either --hex or --base64",
-                )),
-                (None, None) => Err(AnyTlsError::protocol(
-                    "generate rand requires --hex <bytes> or --base64 <bytes>",
-                )),
-                (Some(bytes), None) => {
-                    if bytes == 0 {
-                        return Err(AnyTlsError::protocol("random hex byte length must be greater than 0"));
-                    }
-                    println!("{}", random_hex(bytes));
-                    Ok(())
+        GenerateCommand::Rand { hex, base64 } => match (hex, base64) {
+            (Some(_), Some(_)) => Err(AnyTlsError::protocol(
+                "generate rand accepts either --hex or --base64",
+            )),
+            (None, None) => Err(AnyTlsError::protocol(
+                "generate rand requires --hex <bytes> or --base64 <bytes>",
+            )),
+            (Some(bytes), None) => {
+                if bytes == 0 {
+                    return Err(AnyTlsError::protocol(
+                        "random hex byte length must be greater than 0",
+                    ));
                 }
-                (None, Some(bytes)) => {
-                    if bytes == 0 {
-                        return Err(AnyTlsError::protocol("random base64 byte length must be greater than 0"));
-                    }
-                    println!("{}", random_base64(bytes));
-                    Ok(())
-                }
+                println!("{}", random_hex(bytes));
+                Ok(())
             }
-        }
+            (None, Some(bytes)) => {
+                if bytes == 0 {
+                    return Err(AnyTlsError::protocol(
+                        "random base64 byte length must be greater than 0",
+                    ));
+                }
+                println!("{}", random_base64(bytes));
+                Ok(())
+            }
+        },
         GenerateCommand::RealityServerConfig {
             listen,
             server,
@@ -330,9 +336,9 @@ fn run_generate(command: GenerateCommand) -> Result<()> {
             let short_id = short_id.unwrap_or_default();
             let reality_dest = dest.unwrap_or_else(|| format!("{sni}:443"));
             let tcp_brutal = match (up_mbps, down_mbps) {
-                (Some(up_mbps), Some(down_mbps)) => {
-                    Some(ServerTcpBrutalConfig::enabled(up_mbps, down_mbps, cwnd_gain))
-                }
+                (Some(up_mbps), Some(down_mbps)) => Some(ServerTcpBrutalConfig::enabled(
+                    up_mbps, down_mbps, cwnd_gain,
+                )),
                 (None, None) => None,
                 _ => {
                     return Err(AnyTlsError::protocol(
@@ -366,8 +372,14 @@ fn run_generate(command: GenerateCommand) -> Result<()> {
             println!("public_key: {public_key}");
             println!("short_id: {short_id}");
             if let Some(tcp_brutal) = &tcp_brutal {
-                println!("tcp_brutal_up_mbps: {}", tcp_brutal.up_mbps.unwrap_or_default());
-                println!("tcp_brutal_down_mbps: {}", tcp_brutal.down_mbps.unwrap_or_default());
+                println!(
+                    "tcp_brutal_up_mbps: {}",
+                    tcp_brutal.up_mbps.unwrap_or_default()
+                );
+                println!(
+                    "tcp_brutal_down_mbps: {}",
+                    tcp_brutal.down_mbps.unwrap_or_default()
+                );
             }
             println!();
 
@@ -390,9 +402,12 @@ fn run_generate(command: GenerateCommand) -> Result<()> {
             println!();
 
             println!("# anytls server yaml");
-            print!("{}", serde_yaml::to_string(&server_config).map_err(|err| {
-                AnyTlsError::protocol(format!("failed to serialize server yaml: {err}"))
-            })?);
+            print!(
+                "{}",
+                serde_yaml::to_string(&server_config).map_err(|err| {
+                    AnyTlsError::protocol(format!("failed to serialize server yaml: {err}"))
+                })?
+            );
             println!();
 
             println!("# anyreality client json");
@@ -440,7 +455,11 @@ fn run_generate(command: GenerateCommand) -> Result<()> {
                 })?
             );
             println!("./anytls server --config anyreality.yaml");
-            if let Some(tcp_brutal) = server_config.tcp_brutal.enabled.then_some(server_config.tcp_brutal) {
+            if let Some(tcp_brutal) = server_config
+                .tcp_brutal
+                .enabled
+                .then_some(server_config.tcp_brutal)
+            {
                 let down_rate = mbps_to_bytes_per_second(tcp_brutal.down_mbps.unwrap_or_default())?;
                 println!("# tcp-brutal server send rate: {down_rate} bytes/s");
             }
@@ -455,10 +474,7 @@ fn tcp_brutal_config(rate: Option<u64>, cwnd_gain: Option<u32>) -> Result<Option
         (None, Some(_)) => Err(AnyTlsError::protocol(
             "--tcp-brutal-cwnd-gain requires --tcp-brutal-rate",
         )),
-        (Some(rate), cwnd_gain) => Ok(Some(TcpBrutalConfig::new(
-            rate,
-            cwnd_gain.unwrap_or(15),
-        )?)),
+        (Some(rate), cwnd_gain) => Ok(Some(TcpBrutalConfig::new(rate, cwnd_gain.unwrap_or(15))?)),
     }
 }
 
@@ -619,12 +635,12 @@ async fn handle_socks5(mut inbound: TcpStream, client: Client) -> Result<()> {
         return handle_socks5_udp_associate(inbound, client, destination).await;
     }
     if command != 1 {
-        return Err(AnyTlsError::protocol("only SOCKS5 CONNECT and UDP ASSOCIATE are supported"));
+        return Err(AnyTlsError::protocol(
+            "only SOCKS5 CONNECT and UDP ASSOCIATE are supported",
+        ));
     }
     let mut proxy = client.create_proxy_stream(&destination).await?;
-    inbound
-        .write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
-        .await?;
+    inbound.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
     let _ = copy_bidirectional(&mut inbound, proxy.stream_mut()).await?;
     proxy.release().await;
     Ok(())
@@ -829,7 +845,9 @@ fn decode_socks5_udp_packet(packet: &[u8]) -> Result<(Vec<u8>, SocksAddr)> {
         return Err(AnyTlsError::protocol("SOCKS5 UDP packet has invalid RSV"));
     }
     if packet[2] != 0 {
-        return Err(AnyTlsError::protocol("SOCKS5 UDP fragmentation is not supported"));
+        return Err(AnyTlsError::protocol(
+            "SOCKS5 UDP fragmentation is not supported",
+        ));
     }
 
     let mut cursor = std::io::Cursor::new(&packet[3..]);
@@ -854,7 +872,10 @@ fn read_socks_request_addr_from_reader(reader: &mut std::io::Cursor<&[u8]>) -> R
             std::io::Read::read_exact(reader, &mut ip)?;
             let mut port = [0_u8; 2];
             std::io::Read::read_exact(reader, &mut port)?;
-            Ok(SocksAddr::Ip(SocketAddr::new(IpAddr::from(ip), u16::from_be_bytes(port))))
+            Ok(SocksAddr::Ip(SocketAddr::new(
+                IpAddr::from(ip),
+                u16::from_be_bytes(port),
+            )))
         }
         3 => {
             let mut len = [0_u8; 1];
@@ -874,7 +895,10 @@ fn read_socks_request_addr_from_reader(reader: &mut std::io::Cursor<&[u8]>) -> R
             std::io::Read::read_exact(reader, &mut ip)?;
             let mut port = [0_u8; 2];
             std::io::Read::read_exact(reader, &mut port)?;
-            Ok(SocksAddr::Ip(SocketAddr::new(IpAddr::from(ip), u16::from_be_bytes(port))))
+            Ok(SocksAddr::Ip(SocketAddr::new(
+                IpAddr::from(ip),
+                u16::from_be_bytes(port),
+            )))
         }
         _ => Err(AnyTlsError::protocol("unknown SOCKS UDP address type")),
     }
