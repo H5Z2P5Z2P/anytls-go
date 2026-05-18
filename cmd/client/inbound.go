@@ -38,9 +38,9 @@ func handleTcpConnection(ctx context.Context, c net.Conn, s *myClient) {
 
 	switch headerBytes[0] {
 	case socks4.Version, socks5.Version:
-		socks.HandleConnection0(ctx, c, reader, nil, s, metadata)
+		_ = socks.HandleConnectionEx(ctx, c, reader, nil, s, nil, 0, metadata.Source, nil)
 	default:
-		http.HandleConnection(ctx, c, reader, nil, s, metadata)
+		_ = http.HandleConnectionEx(ctx, c, reader, nil, s, metadata.Source, nil)
 	}
 }
 
@@ -57,6 +57,13 @@ func (c *myClient) NewConnection(ctx context.Context, conn net.Conn, metadata M.
 	return bufio.CopyConn(ctx, conn, proxyC)
 }
 
+func (c *myClient) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, destination M.Socksaddr, onClose network.CloseHandlerFunc) {
+	err := c.NewConnection(ctx, conn, M.Metadata{Source: source, Destination: destination})
+	if onClose != nil {
+		onClose(err)
+	}
+}
+
 func (c *myClient) NewPacketConnection(ctx context.Context, conn network.PacketConn, metadata M.Metadata) error {
 	proxyC, err := c.CreateProxy(ctx, uot.RequestDestination(2))
 	if err != nil {
@@ -71,4 +78,11 @@ func (c *myClient) NewPacketConnection(ctx context.Context, conn network.PacketC
 	uotC := uot.NewLazyConn(proxyC, request)
 
 	return bufio.CopyPacketConn(ctx, conn, uotC)
+}
+
+func (c *myClient) NewPacketConnectionEx(ctx context.Context, conn network.PacketConn, source M.Socksaddr, destination M.Socksaddr, onClose network.CloseHandlerFunc) {
+	err := c.NewPacketConnection(ctx, conn, M.Metadata{Source: source, Destination: destination})
+	if onClose != nil {
+		onClose(err)
+	}
 }

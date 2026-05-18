@@ -3,6 +3,7 @@ package main
 import (
 	"anytls/proxy/padding"
 	"anytls/proxy/session"
+	"anytls/proxy/tcpbrutal"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -24,7 +25,24 @@ func handleTcpConnection(ctx context.Context, c net.Conn, s *myServer) {
 		}
 	}()
 
-	c = tls.Server(c, s.tlsConfig)
+	if s.tcpBrutal != nil {
+		if err := tcpbrutal.Apply(c, s.tcpBrutal); err != nil {
+			logrus.Errorln("tcp brutal:", err)
+			c.Close()
+			return
+		}
+	}
+	if s.realityServer != nil {
+		var err error
+		c, err = s.realityServer.ServerHandshake(c)
+		if err != nil {
+			logrus.Debugln("reality handshake:", err)
+			c.Close()
+			return
+		}
+	} else {
+		c = tls.Server(c, s.tlsConfig)
+	}
 	defer c.Close()
 
 	b := buf.NewPacket()

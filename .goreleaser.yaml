@@ -1,5 +1,5 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
+version: 2
+
 project_name: anytls
 builds:
   - id: anytls-client
@@ -17,6 +17,7 @@ builds:
     flags:
       - -trimpath
       - -buildvcs=false
+      - -tags=with_utls
     ldflags:
       - -s -w
   - id: anytls-server
@@ -34,12 +35,32 @@ builds:
     flags:
       - -trimpath
       - -buildvcs=false
+      - -tags=with_utls
     ldflags:
       - -s -w
 archives:
+  - id: anytls-client-binary
+    ids:
+      - anytls-client
+    formats:
+      - binary
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
+  - id: anytls-server-binary
+    ids:
+      - anytls-server
+    formats:
+      - binary
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
   - id: anytls
-    builds:
+    ids:
       - anytls-client
       - anytls-server
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: zip
+    formats:
+      - zip
+checksum:
+  name_template: checksums.txt
+release:
+  extra_files:
+    - glob: anyreality.yaml
+    - glob: deploy/systemd/anytls-anyreality.service

@@ -2,6 +2,8 @@ package main
 
 import (
 	"anytls/proxy"
+	"anytls/proxy/reality"
+	"anytls/proxy/tcpbrutal"
 	"anytls/util"
 	"context"
 	"crypto/sha256"
@@ -23,6 +25,12 @@ func main() {
 	sni := flag.String("sni", "", "Server Name Indication")
 	password := flag.String("p", "", "Password")
 	minIdleSession := flag.Int("m", 5, "Reserved min idle session")
+	security := flag.String("security", "tls", "server security: tls or reality")
+	realityPublicKey := flag.String("pbk", "", "Reality public key")
+	realityShortID := flag.String("sid", "", "Reality short ID")
+	realityFingerprint := flag.String("fp", "chrome", "Reality client fingerprint")
+	tcpBrutalRate := flag.Uint64("tcp-brutal-rate", 0, "enable tcp brutal with send rate in bytes/s")
+	tcpBrutalCwndGain := flag.Uint("tcp-brutal-cwnd-gain", uint(tcpbrutal.DefaultCwndGain), "tcp brutal cwnd gain")
 	flag.Parse()
 
 	if serverURL, err := url.Parse(*serverAddr); err == nil {
@@ -33,6 +41,18 @@ func main() {
 			}
 			query := serverURL.Query()
 			*sni = query.Get("sni")
+			if value := query.Get("security"); value != "" {
+				*security = value
+			}
+			if value := query.Get("pbk"); value != "" {
+				*realityPublicKey = value
+			}
+			if value := query.Get("sid"); value != "" {
+				*realityShortID = value
+			}
+			if value := query.Get("fp"); value != "" {
+				*realityFingerprint = value
+			}
 		}
 	}
 
@@ -84,10 +104,45 @@ func main() {
 	}
 
 	ctx := context.Background()
+	tcpBrutal, err := tcpBrutalConfig(*tcpBrutalRate, uint32(*tcpBrutalCwndGain))
+	if err != nil {
+		logrus.Fatalln(err)
+	}
+	var realityClient reality.Client
+	if strings.EqualFold(*security, "reality") {
+		if *sni == "" {
+			logrus.Fatalln("reality requires -sni or sni= in anytls URI")
+		}
+		if *realityPublicKey == "" {
+			logrus.Fatalln("reality requires -pbk or pbk= in anytls URI")
+		}
+		realityClient, err = reality.NewClient(ctx, reality.ClientConfig{
+			ServerAddress: *serverAddr,
+			ServerName:    *sni,
+			PublicKey:     *realityPublicKey,
+			ShortID:       *realityShortID,
+			Fingerprint:   *realityFingerprint,
+		})
+		if err != nil {
+			logrus.Fatalln(err)
+		}
+	}
 	client := NewMyClient(ctx, func(ctx context.Context) (net.Conn, error) {
 		conn, err := proxy.SystemDialer.DialContext(ctx, "tcp", *serverAddr)
 		if err != nil {
 			return nil, err
+		}
+		if err := tcpbrutal.Apply(conn, tcpBrutal); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if realityClient != nil {
+			realityConn, err := realityClient.ClientHandshake(conn)
+			if err != nil {
+				conn.Close()
+				return nil, err
+			}
+			return realityConn, nil
 		}
 		conn = tls.Client(conn, tlsConfig)
 		return conn, nil
@@ -100,4 +155,11 @@ func main() {
 		}
 		go handleTcpConnection(ctx, c, client)
 	}
+}
+
+func tcpBrutalConfig(rate uint64, cwndGain uint32) (*tcpbrutal.Config, error) {
+	if rate == 0 {
+		return nil, nil
+	}
+	return tcpbrutal.NewConfig(rate, cwndGain)
 }
