@@ -110,17 +110,22 @@ impl GaiConfig {
         if self.precedence.is_empty() {
             return addrs;
         }
-        addrs.sort_by_key(|addr| Reverse(self.precedence_key(addr.ip())));
+        addrs.sort_by_key(|addr| Reverse(self.precedence_value(addr.ip())));
         addrs
     }
 
-    fn precedence_key(&self, ip: IpAddr) -> (i32, u8) {
-        self.precedence
-            .iter()
-            .filter(|entry| entry.prefix.matches(ip))
-            .map(|entry| (entry.value, entry.prefix.len))
-            .max()
-            .unwrap_or((0, 0))
+    fn precedence_value(&self, ip: IpAddr) -> i32 {
+        let mut matched = None;
+        for entry in &self.precedence {
+            if entry.prefix.matches(ip)
+                && matched
+                    .as_ref()
+                    .is_none_or(|best: &&GaiPrecedence| entry.prefix.len > best.prefix.len)
+            {
+                matched = Some(entry);
+            }
+        }
+        matched.map_or(0, |entry| entry.value)
     }
 }
 
@@ -194,6 +199,19 @@ mod tests {
         let addrs = config.sort_socket_addrs(addrs);
 
         assert!(addrs[0].is_ipv4());
+    }
+
+    #[test]
+    fn gai_precedence_uses_longest_matching_prefix() {
+        let config = GaiConfig::parse("precedence ::/0 100\nprecedence ::ffff:0:0/96 10\n");
+        let addrs = vec![
+            "162.159.140.220:443".parse().unwrap(),
+            "[2606:4700:7::da]:443".parse().unwrap(),
+        ];
+
+        let addrs = config.sort_socket_addrs(addrs);
+
+        assert!(addrs[0].is_ipv6());
     }
 
     #[test]
