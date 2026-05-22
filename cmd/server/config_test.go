@@ -21,6 +21,9 @@ tcp_brutal:
   enabled: true
   up_mbps: 500
   down_mbps: 50
+tcp_fast_open:
+  enabled: true
+  queue_length: 2048
 `), &config); err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +40,32 @@ tcp_brutal:
 	}
 	if config.TCPBrutal.DownMbps != 50 {
 		t.Fatalf("unexpected down_mbps: %d", config.TCPBrutal.DownMbps)
+	}
+	if config.TCPFastOpen.Enabled == nil || !*config.TCPFastOpen.Enabled || config.TCPFastOpen.QueueLength != 2048 {
+		t.Fatalf("unexpected tcp_fast_open config: %#v", config.TCPFastOpen)
+	}
+}
+
+func TestTCPFastOpenDefaultsToEnabled(t *testing.T) {
+	config := ServerTCPFastOpenConfig{}
+	tfo, err := config.ToServerTCPFastOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tfo == nil {
+		t.Fatal("expected tcp fast open to be enabled by default")
+	}
+}
+
+func TestTCPFastOpenCanBeDisabled(t *testing.T) {
+	enabled := false
+	config := ServerTCPFastOpenConfig{Enabled: &enabled}
+	tfo, err := config.ToServerTCPFastOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tfo != nil {
+		t.Fatal("expected tcp fast open to be disabled")
 	}
 }
 

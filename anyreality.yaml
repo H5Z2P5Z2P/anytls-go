@@ -16,3 +16,6 @@ tcp_brutal:
   up_mbps: 300
   down_mbps: 300
   cwnd_gain: 15
+tcp_fast_open:
+  enabled: true
+  queue_length: 4096

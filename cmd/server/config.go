@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"anytls/proxy/tcpbrutal"
+	"anytls/proxy/tcpfastopen"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,13 +16,14 @@ const (
 )
 
 type ServerFileConfig struct {
-	Listen        string                `yaml:"listen"`
-	Password      string                `yaml:"password"`
-	PaddingScheme *string               `yaml:"padding_scheme"`
-	Security      string                `yaml:"security"`
-	TLS           *TLSFileConfig        `yaml:"tls"`
-	Reality       *RealityFileConfig    `yaml:"reality"`
-	TCPBrutal     ServerTCPBrutalConfig `yaml:"tcp_brutal"`
+	Listen        string                  `yaml:"listen"`
+	Password      string                  `yaml:"password"`
+	PaddingScheme *string                 `yaml:"padding_scheme"`
+	Security      string                  `yaml:"security"`
+	TLS           *TLSFileConfig          `yaml:"tls"`
+	Reality       *RealityFileConfig      `yaml:"reality"`
+	TCPBrutal     ServerTCPBrutalConfig   `yaml:"tcp_brutal"`
+	TCPFastOpen   ServerTCPFastOpenConfig `yaml:"tcp_fast_open"`
 }
 
 type TLSFileConfig struct {
@@ -44,6 +46,11 @@ type ServerTCPBrutalConfig struct {
 	UpMbps   uint64 `yaml:"up_mbps"`
 	DownMbps uint64 `yaml:"down_mbps"`
 	CwndGain uint32 `yaml:"cwnd_gain"`
+}
+
+type ServerTCPFastOpenConfig struct {
+	Enabled     *bool `yaml:"enabled"`
+	QueueLength int   `yaml:"queue_length"`
 }
 
 func LoadServerFileConfig(path string) (*ServerFileConfig, error) {
@@ -86,4 +93,11 @@ func (c ServerTCPBrutalConfig) ToServerTCPBrutal() (*tcpbrutal.Config, error) {
 		return nil, err
 	}
 	return tcpbrutal.NewConfig(rate, c.CwndGain)
+}
+
+func (c ServerTCPFastOpenConfig) ToServerTCPFastOpen() (*tcpfastopen.Config, error) {
+	if c.Enabled != nil && !*c.Enabled {
+		return nil, nil
+	}
+	return tcpfastopen.NewConfig(c.QueueLength)
 }

@@ -4,13 +4,13 @@ import (
 	"anytls/proxy/padding"
 	"anytls/proxy/reality"
 	"anytls/proxy/tcpbrutal"
+	"anytls/proxy/tcpfastopen"
 	"anytls/util"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -43,6 +43,8 @@ func main() {
 	realityFingerprint := flag.String("reality-fingerprint", "chrome", "Reality client fingerprint hint")
 	tcpBrutalRate := flag.Uint64("tcp-brutal-rate", 0, "enable tcp brutal with send rate in bytes/s")
 	tcpBrutalCwndGain := flag.Uint("tcp-brutal-cwnd-gain", uint(tcpbrutal.DefaultCwndGain), "tcp brutal cwnd gain")
+	tcpFastOpen := flag.Bool("tcp-fast-open", true, "enable TCP Fast Open on the server listener")
+	tcpFastOpenQueue := flag.Int("tcp-fast-open-queue", tcpfastopen.DefaultQueueLength, "TCP Fast Open pending SYN data queue length")
 	flag.Parse()
 
 	logLevel, err := logrus.ParseLevel(os.Getenv("LOG_LEVEL"))
@@ -67,6 +69,8 @@ func main() {
 		realityFingerprint: *realityFingerprint,
 		tcpBrutalRate:      *tcpBrutalRate,
 		tcpBrutalCwndGain:  uint32(*tcpBrutalCwndGain),
+		tcpFastOpen:        *tcpFastOpen,
+		tcpFastOpenQueue:   *tcpFastOpenQueue,
 	})
 	if err != nil {
 		logrus.Fatalln(err)
@@ -84,9 +88,12 @@ func main() {
 	logrus.Infoln("[Server]", util.ProgramVersionName)
 	logrus.Infoln("[Server] Listening TCP", runtimeConfig.listen)
 
-	listener, err := net.Listen("tcp", runtimeConfig.listen)
+	listener, err := tcpfastopen.Listen(ctx, "tcp", runtimeConfig.listen, runtimeConfig.tcpFastOpen)
 	if err != nil {
 		logrus.Fatalln("listen server tcp:", err)
+	}
+	if runtimeConfig.tcpFastOpen != nil {
+		logrus.Infoln("[Server] TCP Fast Open enabled, queue length", runtimeConfig.tcpFastOpen.QueueLength)
 	}
 
 	server := NewMyServer(runtimeConfig.tlsConfig, runtimeConfig.realityServer, runtimeConfig.tcpBrutal)
@@ -107,6 +114,7 @@ type serverRuntimeConfig struct {
 	tlsConfig     *tls.Config
 	realityServer reality.Server
 	tcpBrutal     *tcpbrutal.Config
+	tcpFastOpen   *tcpfastopen.Config
 }
 
 type serverFlagConfig struct {
@@ -124,6 +132,8 @@ type serverFlagConfig struct {
 	realityFingerprint string
 	tcpBrutalRate      uint64
 	tcpBrutalCwndGain  uint32
+	tcpFastOpen        bool
+	tcpFastOpenQueue   int
 }
 
 func buildServerRuntimeConfig(ctx context.Context, flags serverFlagConfig) (*serverRuntimeConfig, error) {
@@ -139,6 +149,10 @@ func buildServerRuntimeConfig(ctx context.Context, flags serverFlagConfig) (*ser
 		Listen:   flags.listen,
 		Password: flags.password,
 		Security: flags.security,
+		TCPFastOpen: ServerTCPFastOpenConfig{
+			Enabled:     &flags.tcpFastOpen,
+			QueueLength: flags.tcpFastOpenQueue,
+		},
 	}
 	if flags.paddingScheme != "" {
 		config.PaddingScheme = &flags.paddingScheme
@@ -159,7 +173,11 @@ func buildServerRuntimeConfig(ctx context.Context, flags serverFlagConfig) (*ser
 		}
 	}
 	config.setDefaults()
-	return buildServerRuntimeConfigFromParsed(ctx, config, tcpBrutal)
+	tcpFastOpen, err := config.TCPFastOpen.ToServerTCPFastOpen()
+	if err != nil {
+		return nil, err
+	}
+	return buildServerRuntimeConfigFromParsed(ctx, config, tcpBrutal, tcpFastOpen)
 }
 
 func buildServerRuntimeConfigFromFile(ctx context.Context, path string) (*serverRuntimeConfig, error) {
@@ -171,14 +189,19 @@ func buildServerRuntimeConfigFromFile(ctx context.Context, path string) (*server
 	if err != nil {
 		return nil, err
 	}
-	return buildServerRuntimeConfigFromParsed(ctx, config, tcpBrutal)
+	tcpFastOpen, err := config.TCPFastOpen.ToServerTCPFastOpen()
+	if err != nil {
+		return nil, err
+	}
+	return buildServerRuntimeConfigFromParsed(ctx, config, tcpBrutal, tcpFastOpen)
 }
 
-func buildServerRuntimeConfigFromParsed(ctx context.Context, config *ServerFileConfig, tcpBrutal *tcpbrutal.Config) (*serverRuntimeConfig, error) {
+func buildServerRuntimeConfigFromParsed(ctx context.Context, config *ServerFileConfig, tcpBrutal *tcpbrutal.Config, tcpFastOpen *tcpfastopen.Config) (*serverRuntimeConfig, error) {
 	runtimeConfig := &serverRuntimeConfig{
-		listen:    config.Listen,
-		password:  config.Password,
-		tcpBrutal: tcpBrutal,
+		listen:      config.Listen,
+		password:    config.Password,
+		tcpBrutal:   tcpBrutal,
+		tcpFastOpen: tcpFastOpen,
 	}
 	if config.PaddingScheme != nil {
 		runtimeConfig.paddingScheme = *config.PaddingScheme
